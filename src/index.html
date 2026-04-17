@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MotoReel • Authentic Rider Reels</title>
+    <meta name="description" content="Simple, authentic video editor for real motorcycle riders. No hype. Just the ride.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- ffmpeg.wasm v0.11.6 (UMD) — stable createFFmpeg API, no Cross-Origin Isolation required -->
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body { font-family: 'Inter', system_ui, sans-serif; }
+        .mono { font-family: 'Roboto Mono', monospace; }
+        .moto-gradient { background: linear-gradient(135deg, #c2410c 0%, #9a3412 100%); }
+        .section-card { transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s; }
+        .drop-zone { border: 3px dashed #c2410c; transition: all 0.3s; }
+        .drop-zone.dragover { background-color: #431407; border-color: #f59e0b; }
+        .preset-btn { transition: all 0.2s; }
+        .preset-btn.active { background-color: #c2410c; color: white; border-color: #c2410c; }
+        .simple-slider { accent-color: #c2410c; }
+        .beat-marker { position: absolute; width: 2px; background: #f59e0b; height: 100%; top: 0; pointer-events: none; }
+    </style>
+</head>
+<body class="bg-zinc-950 text-zinc-200">
+    <!-- Header -->
+    <header class="border-b border-zinc-800 bg-zinc-900 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-x-4">
+                <div class="w-11 h-11 moto-gradient rounded-2xl flex items-center justify-center text-white">
+                    <i class="fa-solid fa-motorcycle text-3xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-3xl font-bold tracking-tighter">MotoReel</h1>
+                    <p class="text-xs text-zinc-500 -mt-1">FOR RIDERS WHO KNOW THE ROAD</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-x-3">
+                <div class="bg-zinc-900 border border-zinc-700 rounded-2xl px-4 py-1.5 flex items-center gap-x-3">
+                    <div>
+                        <div class="text-xs text-zinc-500">AUTHENTICITY</div>
+                        <div id="viral-score" class="text-2xl font-bold text-amber-400 mono">91</div>
+                    </div>
+                    <div class="text-3xl">🏍️</div>
+                </div>
+                
+                <button onclick="saveProject()" class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl text-sm flex items-center gap-x-2">
+                    <i class="fa-solid fa-save"></i> <span>SAVE</span>
+                </button>
+                
+                <button onclick="loadDemoData()" class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl text-sm flex items-center gap-x-2">
+                    <i class="fa-solid fa-play"></i> <span>DEMO</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="max-w-7xl mx-auto px-6 py-6">
+        <!-- Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-4 flex items-center gap-4">
+                <div class="w-9 h-9 bg-amber-500/10 text-amber-400 rounded-2xl flex items-center justify-center"><i class="fa-solid fa-video"></i></div>
+                <div><div class="text-xs text-zinc-500">CLIPS</div><div id="clips-count" class="text-3xl font-semibold mono">0</div></div>
+            </div>
+            <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-4 flex items-center gap-4">
+                <div class="w-9 h-9 bg-sky-500/10 text-sky-400 rounded-2xl flex items-center justify-center"><i class="fa-solid fa-music"></i></div>
+                <div><div class="text-xs text-zinc-500">MUSIC</div><div id="music-status" class="text-lg font-semibold">None</div></div>
+            </div>
+            <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-4 flex items-center gap-4">
+                <div class="w-9 h-9 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center"><i class="fa-solid fa-clock"></i></div>
+                <div><div class="text-xs text-zinc-500">RUNTIME</div><div id="total-duration" class="text-3xl font-semibold mono">0s</div></div>
+            </div>
+            <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-4 flex items-center gap-4">
+                <div class="w-9 h-9 bg-rose-500/10 text-rose-400 rounded-2xl flex items-center justify-center"><i class="fa-solid fa-chart-line"></i></div>
+                <div><div class="text-xs text-zinc-500">PROJECTED REACH</div><div id="projected-views" class="text-3xl font-semibold mono">87k</div></div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            
+            <!-- CLIPS + TIMELINE -->
+            <div class="xl:col-span-5 space-y-6">
+                <div class="section-card bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-semibold text-lg flex items-center gap-x-2"><i class="fa-solid fa-upload text-amber-600"></i> <span>UPLOAD FOOTAGE</span></h3>
+                        <div class="text-xs px-3 py-1 bg-zinc-800 rounded-2xl text-amber-400">9:16 READY</div>
+                    </div>
+                    
+                    <div id="drop-zone" class="drop-zone border-2 border-dashed border-amber-600/70 hover:border-amber-500 rounded-3xl p-8 text-center cursor-pointer" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                        <div class="mx-auto w-14 h-14 bg-zinc-800 rounded-full flex items-center justify-center mb-3"><i class="fa-solid fa-cloud-upload-alt text-3xl text-amber-500"></i></div>
+                        <p class="font-medium">Drop your clips here</p>
+                        <p class="text-xs text-zinc-500 mt-1">or</p>
+                        <button onclick="document.getElementById('clip-upload').click()" class="mt-3 px-6 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-2xl">BROWSE FILES</button>
+                        <input type="file" id="clip-upload" multiple accept="video/*" class="hidden" onchange="handleClipUpload(event)">
+                    </div>
+                </div>
+
+                <div class="section-card bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-semibold text-lg flex items-center gap-x-2"><i class="fa-solid fa-list-ol text-amber-600"></i> <span>TIMELINE</span></h3>
+                        <div class="flex gap-x-2">
+                            <button onclick="clearAllClips()" class="px-3 py-1 text-red-400 hover:text-red-300 text-xs flex items-center gap-x-1"><i class="fa-solid fa-trash"></i> CLEAR</button>
+                            <button onclick="autoArrangeClips()" class="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 rounded-xl text-xs flex items-center gap-x-1"><i class="fa-solid fa-magic"></i> SORT</button>
+                        </div>
+                    </div>
+                    
+                    <div id="timeline" class="min-h-[210px] bg-zinc-950 border border-zinc-800 rounded-2xl p-4 space-y-3 overflow-y-auto max-h-[320px]">
+                        <div class="text-center py-10 text-zinc-500 text-sm">No footage yet. Upload your rides.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PRESETS + MUSIC + BEAT SYNC -->
+            <div class="xl:col-span-4 space-y-6">
+                <div class="section-card bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
+                    <h3 class="font-semibold text-lg mb-4 flex items-center gap-x-2"><i class="fa-solid fa-magic text-amber-600"></i> <span>REEL STYLE</span></h3>
+                    <div class="grid grid-cols-2 gap-3" id="presets-grid"></div>
+                </div>
+
+                <div class="section-card bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
+                    <h3 class="font-semibold text-lg mb-4 flex items-center gap-x-2"><i class="fa-solid fa-headset text-amber-600"></i> <span>MUSIC &amp; SYNC</span></h3>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <div class="text-xs uppercase tracking-widest text-zinc-500 mb-1.5">BACKGROUND TRACK</div>
+                            <input type="file" id="music-upload" accept="audio/*" class="hidden" onchange="handleMusicUpload(event)">
+                            <button onclick="document.getElementById('music-upload').click()" class="w-full px-4 py-3 border border-zinc-700 hover:border-amber-600 rounded-2xl text-sm flex items-center justify-center gap-x-2">
+                                <i class="fa-solid fa-music"></i> <span id="music-name">Choose track or upload</span>
+                            </button>
+                        </div>
+                        
+                        <div class="flex gap-2 flex-wrap">
+                            <button onclick="usePresetMusic('https://cdn.pixabay.com/audio/2022/05/13/audio_1808b5f1e1.mp3', 'Iron &amp; Asphalt')" class="text-xs px-3 py-1.5 bg-zinc-800 hover:bg-amber-900/30 border border-zinc-700 rounded-2xl">Iron &amp; Asphalt</button>
+                            <button onclick="usePresetMusic('https://cdn.pixabay.com/audio/2024/01/16/audio_5f2e9f0f0f.mp3', 'Night Run')" class="text-xs px-3 py-1.5 bg-zinc-800 hover:bg-amber-900/30 border border-zinc-700 rounded-2xl">Night Run</button>
+                        </div>
+                        
+                        <div class="pt-3 border-t border-zinc-800">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="text-xs uppercase tracking-widest text-zinc-500">BEAT SYNC</div>
+                                <button onclick="analyzeBeats()" class="text-xs px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-xl flex items-center gap-x-1"><i class="fa-solid fa-sync-alt text-xs"></i> <span>ANALYZE BEATS</span></button>
+                            </div>
+                            <div id="beat-info" class="text-xs text-zinc-500">Load music then analyze for natural cut points</div>
+                            <div id="beat-markers" class="mt-2 h-6 bg-zinc-950 border border-zinc-800 rounded relative overflow-hidden"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- OVERLAYS + TOOLS -->
+            <div class="xl:col-span-3 space-y-6">
+                <div class="section-card bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-semibold flex items-center gap-x-2"><i class="fa-solid fa-font text-amber-600"></i> <span>OVERLAYS</span></h3>
+                        <button onclick="showTextOverlayModal()" class="text-xs px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-2xl flex items-center gap-x-1"><i class="fa-solid fa-plus text-xs"></i> ADD</button>
+                    </div>
+                    <div id="text-overlays-list" class="space-y-2 max-h-[180px] overflow-auto text-sm"></div>
+                </div>
+
+                <div class="section-card bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
+                    <h3 class="font-semibold text-lg mb-3">QUICK TOOLS</h3>
+                    <div class="space-y-2 text-sm">
+                        <button onclick="suggestAuthenticHooks()" class="w-full text-left px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-2xl flex items-center justify-between"><span>Suggest rider lines</span> <i class="fa-solid fa-lightbulb text-amber-400"></i></button>
+                        <button onclick="generateCaption()" class="w-full text-left px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-2xl flex items-center justify-between"><span>Copy caption for IG</span> <i class="fa-solid fa-copy text-sky-400"></i></button>
+                        <button onclick="optimizeForRiders()" class="w-full text-left px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-2xl flex items-center justify-between"><span>Trim for flow</span> <i class="fa-solid fa-magic text-emerald-400"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EXPORT -->
+            <div class="xl:col-span-12">
+                <div class="section-card bg-zinc-900 border border-zinc-800 rounded-3xl p-8 flex flex-col lg:flex-row gap-8 items-center">
+                    <div class="flex-1">
+                        <h3 class="text-2xl font-bold tracking-tight">Ready to post?</h3>
+                        <p class="text-zinc-400 mt-1 max-w-md">Clean 9:16 export. No hype. Just the ride, the sound, and the road.</p>
+                    </div>
+                    
+                    <div>
+                        <button onclick="exportReel()" id="export-btn" class="px-16 py-5 bg-gradient-to-r from-amber-600 to-orange-700 hover:from-amber-700 hover:to-orange-800 text-white font-bold text-xl rounded-3xl flex items-center gap-x-4 shadow-xl shadow-amber-900/40 active:scale-[0.985]">
+                            <i class="fa-solid fa-download text-2xl"></i> <span>EXPORT REEL</span>
+                        </button>
+                        <div class="text-center mt-2"><span onclick="showAdvancedOptions()" class="text-xs text-zinc-400 hover:text-zinc-300 cursor-pointer">Advanced options</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Text Overlay Modal -->
+    <div id="text-modal" class="hidden fixed inset-0 bg-black/90 flex items-center justify-center z-[100]">
+        <div class="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-md mx-4 p-7">
+            <div class="flex justify-between items-center mb-5">
+                <h3 class="font-semibold text-lg">Add Overlay</h3>
+                <button onclick="hideTextModal()" class="text-xl text-zinc-400 hover:text-white">&times;</button>
+            </div>
+            
+            <div class="space-y-5">
+                <div>
+                    <label class="text-xs text-zinc-400 block mb-1.5">LINE (keep it short)</label>
+                    <input id="overlay-text" type="text" value="THE SOUND OF THE ROAD" class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-lg">
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-xs text-zinc-400 block mb-1.5">POSITION</label>
+                        <select id="overlay-position" class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3">
+                            <option value="top">Top</option>
+                            <option value="center" selected>Center</option>
+                            <option value="lower">Lower Third</option>
+                            <option value="bottom">Bottom</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs text-zinc-400 block mb-1.5">SIZE</label>
+                        <div class="flex items-center gap-x-3">
+                            <input type="range" id="overlay-size" min="28" max="72" step="2" value="44" class="simple-slider flex-1">
+                            <span id="size-value" class="mono w-8 text-center">44</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="text-xs text-zinc-400 block mb-1.5">TIMING (seconds)</label>
+                    <div class="flex items-center gap-x-3">
+                        <div class="flex-1">
+                            <div class="text-xs text-zinc-500 mb-0.5">START</div>
+                            <input type="range" id="overlay-start" min="0" max="60" step="0.5" value="1.5" class="simple-slider w-full">
+                            <div id="start-value" class="mono text-xs text-center text-amber-400">1.5s</div>
+                        </div>
+                        <div class="flex-1">
+                            <div class="text-xs text-zinc-500 mb-0.5">END</div>
+                            <input type="range" id="overlay-end" min="0" max="60" step="0.5" value="5" class="simple-slider w-full">
+                            <div id="end-value" class="mono text-xs text-center text-amber-400">5s</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex gap-3 pt-2">
+                    <button onclick="addOrUpdateOverlay()" class="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-2xl">ADD TO REEL</button>
+                    <button onclick="hideTextModal()" class="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 rounded-2xl">CANCEL</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Progress Modal -->
+    <div id="progress-modal" class="hidden fixed inset-0 bg-black/90 flex items-center justify-center z-[100]">
+        <div class="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-md mx-4 p-8">
+            <div class="text-center">
+                <div class="mx-auto w-16 h-16 border-4 border-amber-600 border-t-transparent rounded-full animate-spin mb-5"></div>
+                <h3 class="text-xl font-bold mb-1">Building your reel</h3>
+                <p id="progress-status" class="text-zinc-400 text-sm">Processing footage &amp; syncing audio</p>
+                <div class="mt-6 bg-zinc-800 h-2 rounded-full overflow-hidden"><div id="progress-bar" class="progress-bar h-full bg-gradient-to-r from-amber-500 to-orange-600 w-0" style="width:0%"></div></div>
+                <div class="flex justify-between text-xs mt-1.5 text-zinc-500 mono"><div id="progress-percent">0%</div><div id="progress-time">~40s left</div></div>
+                <div id="progress-log" class="mt-5 text-left bg-zinc-950 border border-zinc-800 p-3 rounded-2xl text-xs h-24 overflow-auto font-mono text-emerald-300/70"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="fixed bottom-6 right-6 z-[200] space-y-3"></div>
+
+    <script>
+        // ==================== FULL JAVASCRIPT ====================
+        let clips = [];
+        let musicFile = null;
+        let textOverlays = [];
+        let currentPreset = 'classic';
+        let ffmpegInstance = null;
+        let beatTimes = [];
+        let editingOverlayId = null;
+
+        const presets = [
+            { id: 'classic', name: 'CLASSIC IRON', icon: 'fa-motorcycle', desc: 'Straight road. No nonsense.', color: 'amber' },
+            { id: 'night', name: 'NIGHT RUN', icon: 'fa-moon', desc: 'Dark roads. Pure focus.', color: 'slate' },
+            { id: 'hill', name: 'HILL COUNTRY', icon: 'fa-mountain', desc: 'Twists and torque. Texas roads.', color: 'emerald' },
+            { id: 'raw', name: 'RAW THROTTLE', icon: 'fa-fire', desc: 'No filters. Just the machine.', color: 'orange' },
+            { id: 'cruise', name: 'LONG HAUL', icon: 'fa-road', desc: 'Miles disappearing. Wind in face.', color: 'sky' },
+            { id: 'burn', name: 'THE BURN', icon: 'fa-clock', desc: 'Slow motion. Every detail.', color: 'rose' }
+        ];
+
+        function initApp() {
+            renderPresets();
+            updateStats();
+            
+            const sizeSlider = document.getElementById('overlay-size');
+            if (sizeSlider) sizeSlider.oninput = () => document.getElementById('size-value').textContent = sizeSlider.value;
+            
+            const startSlider = document.getElementById('overlay-start');
+            const endSlider = document.getElementById('overlay-end');
+            if (startSlider) startSlider.oninput = () => document.getElementById('start-value').textContent = startSlider.value + 's';
+            if (endSlider) endSlider.oninput = () => document.getElementById('end-value').textContent = endSlider.value + 's';
+            
+            document.addEventListener('keydown', e => {
+                if (e.key === '/' && document.activeElement.tagName === 'BODY') { e.preventDefault(); document.getElementById('clip-upload').click(); }
+                if (e.metaKey && e.key === 'Enter') { e.preventDefault(); exportReel(); }
+            });
+            
+            document.getElementById('viral-score').textContent = '89';
+        }
+
+        function renderPresets() {
+            const container = document.getElementById('presets-grid');
+            container.innerHTML = '';
+            presets.forEach(p => {
+                const btn = document.createElement('button');
+                btn.className = `preset-btn flex flex-col p-4 rounded-2xl border text-left ${currentPreset === p.id ? 'active border-amber-600 bg-amber-600/10' : 'border-zinc-700 hover:border-zinc-600 bg-zinc-950'}`;
+                btn.innerHTML = `
+                    <div class="flex items-center gap-x-3">
+                        <div class="w-8 h-8 rounded-2xl bg-zinc-800 flex items-center justify-center text-${p.color}-400"><i class="fa-solid ${p.icon}"></i></div>
+                        <div><div class="font-semibold text-sm">${p.name}</div><div class="text-[10px] text-zinc-500 leading-tight">${p.desc}</div></div>
+                    </div>
+                `;
+                btn.onclick = () => {
+                    currentPreset = p.id;
+                    document.querySelectorAll('#presets-grid button').forEach(b => b.classList.remove('active', 'border-amber-600', 'bg-amber-600/10'));
+                    btn.classList.add('active', 'border-amber-600', 'bg-amber-600/10');
+                    updateStats();
+                };
+                container.appendChild(btn);
+            });
+        }
+
+        function updateStats() {
+            document.getElementById('clips-count').textContent = clips.length;
+            let total = 0;
+            clips.forEach(c => total += (c.trimEnd - c.trimStart));
+            document.getElementById('total-duration').textContent = Math.floor(total) + 's';
+            
+            const m = document.getElementById('music-status');
+            m.textContent = musicFile ? (musicFile.name || 'Loaded') : 'None';
+            m.className = musicFile ? 'text-lg font-semibold text-emerald-400' : 'text-lg font-semibold text-zinc-500';
+            
+            const reach = 65000 + (clips.length * 8500) + (musicFile ? 12000 : 0) + (textOverlays.length * 2200);
+            document.getElementById('projected-views').textContent = Math.floor(reach / 1000) + 'k';
+        }
+
+        function handleClipUpload(e) { Array.from(e.target.files).forEach(f => addClip(f)); }
+        function handleDrop(e) { e.preventDefault(); document.getElementById('drop-zone').classList.remove('dragover'); Array.from(e.dataTransfer.files).forEach(f => f.type.startsWith('video/') && addClip(f)); }
+        function handleDragOver(e) { e.preventDefault(); document.getElementById('drop-zone').classList.add('dragover'); }
+        function handleDragLeave() { document.getElementById('drop-zone').classList.remove('dragover'); }
+
+        function addClip(file) {
+            const url = URL.createObjectURL(file);
+            const v = document.createElement('video');
+            v.src = url;
+            v.onloadedmetadata = () => {
+                clips.push({
+                    id: Date.now() + Math.random(),
+                    file, url, name: file.name,
+                    duration: v.duration,
+                    trimStart: 0,
+                    trimEnd: Math.min(v.duration, 10),
+                    speed: 1.0,
+                    order: clips.length
+                });
+                renderTimeline();
+                updateStats();
+            };
+        }
+
+        function renderTimeline() {
+            const c = document.getElementById('timeline');
+            c.innerHTML = '';
+            if (clips.length === 0) {
+                c.innerHTML = `<div class="text-center py-8 text-zinc-500 text-sm">No footage yet. Upload your rides.</div>`;
+                return;
+            }
+            clips.sort((a,b) => a.order - b.order).forEach(clip => {
+                const el = document.createElement('div');
+                el.className = `flex gap-3 bg-zinc-900 border border-zinc-700 hover:border-amber-600 p-3 rounded-2xl`;
+                el.draggable = true;
+                el.dataset.id = clip.id;
+                el.innerHTML = `
+                    <div class="w-14 h-14 bg-black rounded-xl overflow-hidden flex-shrink-0"><video src="${clip.url}" class="w-full h-full object-cover" muted></video></div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex justify-between items-start">
+                            <div class="font-medium text-sm truncate">${clip.name}</div>
+                            <div class="flex gap-x-1 text-xs">
+                                <button onclick="event.stopImmediatePropagation(); editTrim(${clip.id});" class="text-amber-400 hover:text-amber-300 px-1"><i class="fa-solid fa-cut"></i></button>
+                                <button onclick="event.stopImmediatePropagation(); removeClip(${clip.id});" class="text-red-400 hover:text-red-300 px-1"><i class="fa-solid fa-times"></i></button>
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <div class="flex items-center gap-x-2 text-xs">
+                                <div class="mono text-amber-400">${clip.trimStart.toFixed(1)}–${clip.trimEnd.toFixed(1)}s</div>
+                                <div class="flex-1"><input type="range" min="0.5" max="2" step="0.1" value="${clip.speed}" class="simple-slider w-full" oninput="updateSpeed(${clip.id}, this.value)"></div>
+                                <div class="mono text-[10px] w-8 text-right">×${clip.speed}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                el.ondragstart = e => e.dataTransfer.setData('text/plain', clip.id);
+                el.ondragover = e => e.preventDefault();
+                el.ondrop = e => { e.preventDefault(); reorderClips(parseFloat(e.dataTransfer.getData('text/plain')), clip.id); };
+                c.appendChild(el);
+            });
+        }
+
+        function updateSpeed(id, val) { const c = clips.find(x => x.id == id); if (c) { c.speed = parseFloat(val); updateStats(); } }
+        
+        function editTrim(id) {
+            const clip = clips.find(c => c.id == id);
+            if (!clip) return;
+            const startInput = prompt('Start time (seconds)', clip.trimStart.toFixed(1));
+            if (startInput === null) return;
+            const endInput = prompt('End time (seconds)', clip.trimEnd.toFixed(1));
+            if (endInput === null) return;
+            clip.trimStart = Math.max(0, parseFloat(startInput));
+            clip.trimEnd = Math.min(clip.duration, parseFloat(endInput));
+            if (clip.trimEnd <= clip.trimStart) { showToast('End must be after start', 'error'); return; }
+            renderTimeline();
+            updateStats();
+        }
+        
+        function removeClip(id) { clips = clips.filter(c => c.id != id); renderTimeline(); updateStats(); }
+        
+        function reorderClips(fromId, toId) {
+            const f = clips.findIndex(c => c.id == fromId);
+            const t = clips.findIndex(c => c.id == toId);
+            if (f < 0 || t < 0) return;
+            const [m] = clips.splice(f, 1);
+            clips.splice(t, 0, m);
+            clips.forEach((c,i) => c.order = i);
+            renderTimeline();
+        }
+        
+        function clearAllClips() { if (!confirm('Clear all?')) return; clips.forEach(c => URL.revokeObjectURL(c.url)); clips = []; renderTimeline(); updateStats(); }
+        function autoArrangeClips() { clips.sort((a,b) => (b.trimEnd - b.trimStart) - (a.trimEnd - a.trimStart)); clips.forEach((c,i) => c.order = i); renderTimeline(); }
+
+        function handleMusicUpload(e) {
+            const f = e.target.files[0];
+            if (!f) return;
+            musicFile = f;
+            document.getElementById('music-name').innerHTML = `<span class="text-emerald-400">${f.name}</span>`;
+            beatTimes = [];
+            document.getElementById('beat-info').textContent = 'Music loaded. Analyze beats for sync.';
+            updateStats();
+        }
+        
+        function usePresetMusic(url, name) {
+            musicFile = { name, url, isPreset: true };
+            document.getElementById('music-name').innerHTML = `<span class="text-emerald-400">${name}</span>`;
+            beatTimes = [];
+            document.getElementById('beat-info').textContent = 'Preset loaded. Analyze for beats.';
+            updateStats();
+        }
+        
+        async function analyzeBeats() {
+            if (!musicFile) { showToast('Load music first', 'error'); return; }
+            const info = document.getElementById('beat-info');
+            info.textContent = 'Analyzing beats...';
+            try {
+                let audioData;
+                if (musicFile.isPreset && musicFile.url) {
+                    const res = await fetch(musicFile.url);
+                    audioData = await res.arrayBuffer();
+                } else {
+                    audioData = await musicFile.arrayBuffer();
+                }
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const buffer = await audioCtx.decodeAudioData(audioData);
+                const channelData = buffer.getChannelData(0);
+                const windowSize = 1024;
+                const beats = [];
+                let lastBeat = 0;
+                for (let i = 0; i < channelData.length - windowSize; i += windowSize) {
+                    let energy = 0;
+                    for (let j = 0; j < windowSize; j++) energy += Math.abs(channelData[i + j]);
+                    energy /= windowSize;
+                    if (energy > 0.035 && (i - lastBeat) > buffer.sampleRate * 0.25) {
+                        const time = i / buffer.sampleRate;
+                        beats.push(time);
+                        lastBeat = i;
+                    }
+                }
+                beatTimes = beats.slice(0, 20);
+                info.textContent = `${beatTimes.length} beats detected. Ready to sync.`;
+                renderBeatMarkers();
+                showToast(`${beatTimes.length} beats found`, 'success');
+            } catch (err) {
+                info.textContent = 'Beat analysis failed';
+                console.error(err);
+            }
+        }
+        
+        function renderBeatMarkers() {
+            const container = document.getElementById('beat-markers');
+            container.innerHTML = '';
+            if (!beatTimes.length) return;
+            const maxTime = Math.max(...beatTimes, 60);
+            beatTimes.forEach(t => {
+                const m = document.createElement('div');
+                m.className = 'beat-marker';
+                m.style.left = `${(t / maxTime) * 100}%`;
+                container.appendChild(m);
+            });
+        }
+
+        function showTextOverlayModal(overlay = null) {
+            editingOverlayId = overlay ? overlay.id : null;
+            const modal = document.getElementById('text-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            const textInput = document.getElementById('overlay-text');
+            const posSelect = document.getElementById('overlay-position');
+            const sizeSlider = document.getElementById('overlay-size');
+            const startSlider = document.getElementById('overlay-start');
+            const endSlider = document.getElementById('overlay-end');
+            
+            if (overlay) {
+                textInput.value = overlay.text;
+                posSelect.value = overlay.position || 'center';
+                sizeSlider.value = overlay.size || 44;
+                startSlider.value = overlay.start || 1.5;
+                endSlider.value = overlay.end || 5;
+            } else {
+                textInput.value = 'THE SOUND OF THE ROAD';
+                posSelect.value = 'center';
+                sizeSlider.value = 44;
+                startSlider.value = 1.5;
+                endSlider.value = 5;
+            }
+            
+            document.getElementById('size-value').textContent = sizeSlider.value;
+            document.getElementById('start-value').textContent = startSlider.value + 's';
+            document.getElementById('end-value').textContent = endSlider.value + 's';
+        }
+        
+        function hideTextModal() {
+            const modal = document.getElementById('text-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            editingOverlayId = null;
+        }
+        
+        function addOrUpdateOverlay() {
+            const text = document.getElementById('overlay-text').value.trim();
+            if (!text) { hideTextModal(); return; }
+            
+            const pos = document.getElementById('overlay-position').value;
+            const size = parseInt(document.getElementById('overlay-size').value);
+            const start = parseFloat(document.getElementById('overlay-start').value);
+            const end = parseFloat(document.getElementById('overlay-end').value);
+            
+            let y = 50;
+            if (pos === 'top') y = 18;
+            else if (pos === 'lower') y = 68;
+            else if (pos === 'bottom') y = 82;
+            
+            if (editingOverlayId) {
+                const ov = textOverlays.find(o => o.id === editingOverlayId);
+                if (ov) { ov.text = text; ov.position = pos; ov.size = size; ov.start = start; ov.end = end; ov.y = y; }
+            } else {
+                textOverlays.push({ id: Date.now(), text, position: pos, size, start, end, y, color: '#f3e8d8', stroke: true });
+            }
+            
+            hideTextModal();
+            renderTextOverlays();
+            updateStats();
+        }
+        
+        function renderTextOverlays() {
+            const container = document.getElementById('text-overlays-list');
+            container.innerHTML = '';
+            if (textOverlays.length === 0) {
+                container.innerHTML = `<div class="text-xs text-center text-zinc-500 py-3">No overlays yet. Add clean lines that fit the ride.</div>`;
+                return;
+            }
+            textOverlays.forEach((ov, idx) => {
+                const div = document.createElement('div');
+                div.className = 'bg-zinc-950 border border-zinc-700 rounded-2xl px-3 py-2 text-xs flex justify-between items-center';
+                div.innerHTML = `
+                    <div class="min-w-0 flex-1"><div class="truncate font-medium">"${ov.text}"</div><div class="text-[10px] text-zinc-500 mono">${ov.start}s – ${ov.end}s</div></div>
+                    <div class="flex gap-x-2 text-amber-400">
+                        <button onclick="showTextOverlayModal(${JSON.stringify(ov).replace(/"/g, '&quot;')})" class="hover:text-white"><i class="fa-solid fa-edit"></i></button>
+                        <button onclick="deleteOverlay(${idx})" class="hover:text-red-400"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+        
+        function deleteOverlay(idx) { textOverlays.splice(idx, 1); renderTextOverlays(); updateStats(); }
+
+        function suggestAuthenticHooks() {
+            const hooks = {
+                'classic': ['THE SOUND OF THE ROAD', 'IRON AND ASPHALT', 'NO FILTERS NEEDED'],
+                'night': ['HEADLIGHTS ON. WORLD OFF.', 'DARK ROADS. CLEAR MIND.', 'THE NIGHT BELONGS TO RIDERS'],
+                'hill': ['TWIST THE THROTTLE', 'HILL COUNTRY CALLING', 'TORQUE AND TWISTS'],
+                'raw': ['PURE MACHINE', 'NO EXCUSES. JUST THE BIKE.', 'THROTTLE THERAPY'],
+                'cruise': ['MILES DISAPPEARING', 'WIND IN YOUR FACE', 'THE LONG WAY HOME'],
+                'burn': ['EVERY RPM. EVERY DETAIL.', 'SLOW MOTION. FAST HEART.', 'THE BURN THAT MATTERS']
+            };
+            const list = hooks[currentPreset] || hooks['classic'];
+            const choice = prompt(`Authentic lines for ${currentPreset.toUpperCase()}:\n\n${list.map((h,i) => `${i+1}. ${h}`).join('\n')}\n\nPick 1–3 to add:`);
+            if (choice && choice >= 1 && choice <= 3) {
+                const selected = list[parseInt(choice)-1];
+                textOverlays.push({ id: Date.now(), text: selected, position: 'center', size: 48, start: 1.2, end: 4.5, y: 42, color: '#f3e8d8', stroke: true });
+                renderTextOverlays();
+                updateStats();
+                showToast('Line added. Fits the ride.', 'success');
+            }
+        }
+        
+        function generateCaption() {
+            const tone = {
+                'classic': 'Straight road. No filters.',
+                'night': 'The night belongs to those who ride.',
+                'hill': 'Hill Country torque. Real roads.',
+                'raw': 'No excuses. Just the machine.',
+                'cruise': 'The long way home is the only way.',
+                'burn': 'Every detail. Every RPM.'
+            };
+            const caption = `${tone[currentPreset] || 'The road doesn\'t care how you feel.'}\n\nRide it like you mean it.\n\n#Motorcycle #RideReal #NoFilter #BikerLife #TexasRoads`;
+            navigator.clipboard.writeText(caption).then(() => showToast('Caption copied — ready for IG', 'success')).catch(() => prompt('Copy this:', caption));
+        }
+        
+        function optimizeForRiders() {
+            if (clips.length < 2) { showToast('Need at least 2 clips', 'error'); return; }
+            clips.forEach(c => { const d = c.trimEnd - c.trimStart; if (d > 9) c.trimEnd = c.trimStart + 8.5; });
+            if (!textOverlays.find(o => o.text.toLowerCase().includes('ride') || o.text.toLowerCase().includes('road'))) {
+                textOverlays.push({ id: Date.now(), text: 'THE ROAD DOESN\'T CARE', position: 'lower', size: 36, start: Math.max(10, (clips.reduce((a,b) => a + (b.trimEnd - b.trimStart), 0) - 4)), end: 999, y: 72, color: '#d1d5db', stroke: true });
+            }
+            renderTimeline();
+            renderTextOverlays();
+            updateStats();
+            showToast('Trimmed for natural flow. No fluff.', 'success');
+        }
+
+        async function exportReel() {
+            if (clips.length === 0) { showToast('Add footage first', 'error'); return; }
+
+            // Guard against demo placeholder clips (4096-byte fake buffers)
+            const hasRealClip = clips.some(c => c.file && c.file.size > 100000);
+            if (!hasRealClip) {
+                showToast('Demo clips are placeholders \u2014 upload real footage to export', 'error');
+                return;
+            }
+
+            const modal = document.getElementById('progress-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            const bar = document.getElementById('progress-bar');
+            const pct = document.getElementById('progress-percent');
+            const status = document.getElementById('progress-status');
+            const logEl = document.getElementById('progress-log');
+            const exportBtn = document.getElementById('export-btn');
+
+            logEl.innerHTML = '';
+            bar.style.width = '0%';
+            pct.textContent = '0%';
+            status.textContent = 'Warming up the engine...';
+            exportBtn.disabled = true;
+
+            function log(msg, cls) {
+                const d = document.createElement('div');
+                d.className = (cls || 'text-emerald-300/70') + ' text-xs font-mono';
+                d.textContent = msg;
+                logEl.appendChild(d);
+                logEl.scrollTop = logEl.scrollHeight;
+            }
+
+            let dismissBtn = document.getElementById('progress-dismiss');
+            if (!dismissBtn) {
+                dismissBtn = document.createElement('button');
+                dismissBtn.id = 'progress-dismiss';
+                dismissBtn.className = 'mt-4 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl text-xs hidden';
+                dismissBtn.textContent = 'Close';
+                dismissBtn.onclick = () => { modal.classList.add('hidden'); modal.classList.remove('flex'); dismissBtn.classList.add('hidden'); };
+                logEl.parentNode.appendChild(dismissBtn);
+            }
+            dismissBtn.classList.add('hidden');
+
+            try {
+                if (typeof FFmpeg === 'undefined' || !FFmpeg.createFFmpeg) {
+                    throw new Error('FFmpeg library failed to load from CDN. Refresh the page and try again.');
+                }
+                const { createFFmpeg, fetchFile } = FFmpeg;
+
+                if (!ffmpegInstance) {
+                    ffmpegInstance = createFFmpeg({
+                        log: true,
+                        corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+                        logger: ({ type, message }) => { if (type === 'fferr' || type === 'ffout') console.log('[ffmpeg]', message); }
+                    });
+                }
+                const ffmpeg = ffmpegInstance;
+
+                if (!ffmpeg.isLoaded()) {
+                    status.textContent = 'Loading encoder (first run ~20MB)...';
+                    log('Loading ffmpeg-core.wasm...');
+                    await ffmpeg.load();
+                }
+                log('Engine ready');
+                bar.style.width = '8%'; pct.textContent = '8%';
+
+                // Write clips to virtual FS
+                status.textContent = 'Loading clips...';
+                for (let i = 0; i < clips.length; i++) {
+                    ffmpeg.FS('writeFile', `clip${i}.mp4`, await fetchFile(clips[i].file));
+                    log(`Loaded clip ${i+1}/${clips.length} (${clips[i].name})`);
+                    const p = 8 + Math.round((i+1)/clips.length * 22);
+                    bar.style.width = p + '%'; pct.textContent = p + '%';
+                }
+
+                // Concat demux list
+                let concat = '';
+                clips.forEach((_, i) => { concat += `file 'clip${i}.mp4'\n`; });
+                ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concat));
+
+                // Optional music track
+                let hasMusic = false;
+                if (musicFile && (musicFile.url || musicFile instanceof Blob || musicFile instanceof File)) {
+                    try {
+                        status.textContent = 'Loading music...';
+                        let mBuf;
+                        if (musicFile.url) {
+                            const r = await fetch(musicFile.url);
+                            if (!r.ok) throw new Error('music fetch ' + r.status);
+                            mBuf = new Uint8Array(await r.arrayBuffer());
+                        } else {
+                            mBuf = await fetchFile(musicFile);
+                        }
+                        ffmpeg.FS('writeFile', 'music.mp3', mBuf);
+                        hasMusic = true;
+                        log('Music loaded');
+                    } catch (mErr) {
+                        log('Music skipped: ' + mErr.message, 'text-amber-400');
+                    }
+                }
+
+                // Build video filter chain for 9:16
+                let vf = "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,eq=contrast=1.15:saturation=1.1";
+                if (currentPreset === 'raw')   vf += ',noise=alls=6:allf=t';
+                if (currentPreset === 'night') vf += ',curves=all=\'0/0 0.4/0.55 1/1\'';
+                if (currentPreset === 'burn')  vf += ',eq=contrast=1.25:saturation=1.15';
+
+                textOverlays.forEach(ov => {
+                    const txt = (ov.text || '').replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\u2019");
+                    let draw = `,drawtext=text='${txt}':fontcolor=${ov.color || '#f3e8d8'}:fontsize=${ov.size || 36}:x=(w-text_w)/2:y=${ov.y || 50}*h/100:enable='between(t\\,${ov.start || 0}\\,${ov.end || 9})'`;
+                    if (ov.stroke) draw += ':bordercolor=#111111:borderw=2';
+                    vf += draw;
+                });
+
+                const outName = `motoreel-${currentPreset}-${Date.now()}.mp4`;
+                const baseArgs = ['-f', 'concat', '-safe', '0', '-i', 'concat.txt'];
+                const tailArgs = ['-vf', vf,
+                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '24',
+                    '-pix_fmt', 'yuv420p',
+                    '-movflags', '+faststart',
+                    '-r', '30',
+                    '-shortest', outName];
+
+                let args;
+                if (hasMusic) {
+                    args = [...baseArgs, '-i', 'music.mp3',
+                            '-filter_complex', `[0:a?]anull[a0];[1:a]anull[a1];[a0][a1]amix=inputs=2:duration=shortest[aout]`,
+                            '-map', '0:v:0', '-map', '[aout]',
+                            '-c:a', 'aac', '-b:a', '160k',
+                            ...tailArgs];
+                } else {
+                    args = [...baseArgs, '-map', '0:v:0', '-map', '0:a?',
+                            '-c:a', 'aac', '-b:a', '128k',
+                            ...tailArgs];
+                }
+
+                status.textContent = 'Encoding clean 9:16 reel...';
+                bar.style.width = '45%'; pct.textContent = '45%';
+                log('Running ffmpeg...');
+
+                // Progress hook
+                ffmpeg.setProgress(({ ratio }) => {
+                    if (ratio > 0 && ratio <= 1) {
+                        const p = 45 + Math.round(ratio * 50);
+                        bar.style.width = p + '%';
+                        pct.textContent = p + '%';
+                    }
+                });
+
+                await ffmpeg.run(...args);
+                log('Encode complete');
+
+                bar.style.width = '97%'; pct.textContent = '97%';
+                status.textContent = 'Packaging download...';
+
+                const data = ffmpeg.FS('readFile', outName);
+                const blob = new Blob([data.buffer], { type: 'video/mp4' });
+                const dlUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = dlUrl;
+                a.download = outName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(dlUrl), 30000);
+
+                // Cleanup virtual FS
+                try {
+                    clips.forEach((_, i) => { try { ffmpeg.FS('unlink', `clip${i}.mp4`); } catch(e){} });
+                    try { ffmpeg.FS('unlink', 'concat.txt'); } catch(e){}
+                    try { ffmpeg.FS('unlink', 'music.mp3'); } catch(e){}
+                    try { ffmpeg.FS('unlink', outName); } catch(e){}
+                } catch (_) {}
+
+                bar.style.width = '100%'; pct.textContent = '100%';
+                status.textContent = 'Done. Ride delivered.';
+                log('Download started \u2014 check your browser downloads', 'text-emerald-300');
+
+                setTimeout(() => {
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                    showToast('Reel ready \u2014 no hype, just the ride.', 'success');
+                }, 1600);
+
+            } catch (err) {
+                console.error('[exportReel] failed', err);
+                status.textContent = 'Export failed';
+                log('ERROR: ' + (err && err.message ? err.message : String(err)), 'text-red-400');
+                log('See browser console for the full stack trace.', 'text-red-300');
+                dismissBtn.classList.remove('hidden');
+                showToast('Export failed \u2014 see the progress window for details', 'error');
+            } finally {
+                exportBtn.disabled = false;
+            }
+        }
+        
+        function showAdvancedOptions() {
+            const opt = prompt('Advanced options:\n1. Add subtle engine rev overlay\n2. Export vertical Story version\n3. Generate thumbnail frames\n\nEnter number:');
+            if (opt === '1') showToast('Engine SFX overlay added in next build', 'info');
+            else if (opt === '2') showToast('Story export ready in v3.1', 'info');
+            else if (opt === '3') showToast('Best frame is usually 2.8–4.2s in', 'info');
+            else showToast('Thanks. More coming.', 'success');
+        }
+        
+        function saveProject() {
+            const data = { preset: currentPreset, clips: clips.length, overlays: textOverlays.length, saved: new Date().toISOString() };
+            localStorage.setItem('moto-reel-authentic', JSON.stringify(data));
+            showToast('Project saved (re-upload clips on reload)', 'success');
+        }
+        
+        function loadDemoData() {
+            if (clips.length && !confirm('Replace with demo?')) return;
+            clips.forEach(c => URL.revokeObjectURL(c.url));
+            clips = [];
+            
+            const demos = ['HillClimb_Texas.mp4', 'NightRun_35.mp4', 'ThrottleTherapy.mov'];
+            demos.forEach((n, i) => {
+                const b = new Blob([new Uint8Array(4096)], { type: 'video/mp4' });
+                const u = URL.createObjectURL(b);
+                clips.push({ id: Date.now()+i, file: b, url: u, name: n, duration: 12+i*2, trimStart: 0.8, trimEnd: 9+i, speed: 1, order: i });
+            });
+            
+            musicFile = { name: 'Iron & Asphalt (Demo)', isPreset: true };
+            document.getElementById('music-name').innerHTML = `<span class="text-emerald-400">Iron & Asphalt (Demo)</span>`;
+            
+            textOverlays = [{ id: Date.now(), text: 'THE SOUND OF THE ROAD', position: 'center', size: 46, start: 1.2, end: 4.8, y: 42, color: '#f3e8d8', stroke: true }];
+            
+            currentPreset = 'classic';
+            renderPresets();
+            renderTimeline();
+            renderTextOverlays();
+            updateStats();
+            showToast('Demo loaded — real clips export the same way', 'success');
+        }
+        
+        function showToast(msg, type = 'success') {
+            const cont = document.getElementById('toast-container');
+            const t = document.createElement('div');
+            let bg = type === 'error' ? 'bg-red-600' : type === 'info' ? 'bg-sky-600' : 'bg-emerald-600';
+            t.className = `${bg} text-white px-5 py-3 rounded-2xl flex gap-x-3 text-sm shadow-xl max-w-xs`;
+            t.innerHTML = `<i class="fa-solid fa-${type === 'error' ? 'exclamation' : type === 'info' ? 'info' : 'check'}-circle mt-0.5"></i> <div>${msg}</div>`;
+            cont.appendChild(t);
+            setTimeout(() => { t.style.transition = 'all .3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 250); }, 3400);
+        }
+        
+        window.onload = () => {
+            initApp();
+            let clicks = 0;
+            document.querySelector('header').addEventListener('click', () => {
+                clicks++;
+                if (clicks === 3) {
+                    document.getElementById('viral-score').textContent = '98';
+                    showToast('98 — pure rider energy', 'success');
+                    clicks = 0;
+                }
+            });
+        };
+        
+        window.MotoReel = { clips, textOverlays, exportReel, loadDemoData };
+    </script>
+</body>
+</html>

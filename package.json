@@ -1,0 +1,13 @@
+{
+  "name": "motoreel",
+  "version": "1.0.0",
+  "description": "MotoReel — authentic rider reels. 9:16 client-side video export for motorcycle content creators.",
+  "private": false,
+  "scripts": {
+    "dev": "npx serve src",
+    "build": "echo 'static site — nothing to build'"
+  },
+  "keywords": ["motorcycle", "moto", "reels", "video-editor", "ffmpeg-wasm"],
+  "author": "krouskoff",
+  "license": "MIT"
+}
