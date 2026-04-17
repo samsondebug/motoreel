@@ -674,24 +674,43 @@
             dismissBtn.classList.add('hidden');
 
             try {
-                if (typeof FFmpeg === 'undefined' || !FFmpeg.createFFmpeg) {
-                    throw new Error('FFmpeg library failed to load from CDN. Refresh the page and try again.');
+                if (typeof FFmpegWASM === 'undefined' || !FFmpegWASM.FFmpeg) {
+                    throw new Error('FFmpeg library failed to load. Refresh the page and try again.');
                 }
-                const { createFFmpeg, fetchFile } = FFmpeg;
+                const { FFmpeg } = FFmpegWASM;
+
+                // Helper: File/Blob/URL/ArrayBuffer -> Uint8Array
+                const toU8 = async (src) => {
+                    if (!src) throw new Error('empty source');
+                    if (typeof src === 'string') {
+                        const r = await fetch(src); if (!r.ok) throw new Error('fetch ' + r.status);
+                        return new Uint8Array(await r.arrayBuffer());
+                    }
+                    if (src instanceof Uint8Array) return src;
+                    if (src instanceof ArrayBuffer) return new Uint8Array(src);
+                    return new Uint8Array(await src.arrayBuffer());
+                };
 
                 if (!ffmpegInstance) {
-                    ffmpegInstance = createFFmpeg({
-                        log: true,
-                        corePath: '/ffmpeg/ffmpeg-core.js',
-                        logger: ({ type, message }) => { if (type === 'fferr' || type === 'ffout') console.log('[ffmpeg]', message); }
+                    ffmpegInstance = new FFmpeg();
+                    ffmpegInstance.on('log', ({ message }) => { console.log('[ffmpeg]', message); });
+                    ffmpegInstance.on('progress', ({ progress }) => {
+                        if (progress > 0 && progress <= 1) {
+                            const p = 45 + Math.round(progress * 50);
+                            bar.style.width = p + '%';
+                            pct.textContent = p + '%';
+                        }
                     });
                 }
                 const ffmpeg = ffmpegInstance;
 
-                if (!ffmpeg.isLoaded()) {
-                    status.textContent = 'Loading encoder (first run ~20MB)...';
+                if (!ffmpeg.loaded) {
+                    status.textContent = 'Loading encoder (first run ~32MB)...';
                     log('Loading ffmpeg-core.wasm...');
-                    await ffmpeg.load();
+                    await ffmpeg.load({
+                        coreURL: '/ffmpeg/ffmpeg-core.js',
+                        wasmURL: '/ffmpeg/ffmpeg-core.wasm'
+                    });
                 }
                 log('Engine ready');
                 bar.style.width = '8%'; pct.textContent = '8%';
@@ -699,7 +718,7 @@
                 // Write clips to virtual FS
                 status.textContent = 'Loading clips...';
                 for (let i = 0; i < clips.length; i++) {
-                    ffmpeg.FS('writeFile', `clip${i}.mp4`, await fetchFile(clips[i].file));
+                    await ffmpeg.writeFile(`clip${i}.mp4`, await toU8(clips[i].file));
                     log(`Loaded clip ${i+1}/${clips.length} (${clips[i].name})`);
                     const p = 8 + Math.round((i+1)/clips.length * 22);
                     bar.style.width = p + '%'; pct.textContent = p + '%';
@@ -708,22 +727,15 @@
                 // Concat demux list
                 let concat = '';
                 clips.forEach((_, i) => { concat += `file 'clip${i}.mp4'\n`; });
-                ffmpeg.FS('writeFile', 'concat.txt', new TextEncoder().encode(concat));
+                await ffmpeg.writeFile('concat.txt', new TextEncoder().encode(concat));
 
                 // Optional music track
                 let hasMusic = false;
                 if (musicFile && (musicFile.url || musicFile instanceof Blob || musicFile instanceof File)) {
                     try {
                         status.textContent = 'Loading music...';
-                        let mBuf;
-                        if (musicFile.url) {
-                            const r = await fetch(musicFile.url);
-                            if (!r.ok) throw new Error('music fetch ' + r.status);
-                            mBuf = new Uint8Array(await r.arrayBuffer());
-                        } else {
-                            mBuf = await fetchFile(musicFile);
-                        }
-                        ffmpeg.FS('writeFile', 'music.mp3', mBuf);
+                        const mBuf = await toU8(musicFile.url || musicFile);
+                        await ffmpeg.writeFile('music.mp3', mBuf);
                         hasMusic = true;
                         log('Music loaded');
                     } catch (mErr) {
@@ -770,23 +782,15 @@
                 bar.style.width = '45%'; pct.textContent = '45%';
                 log('Running ffmpeg...');
 
-                // Progress hook
-                ffmpeg.setProgress(({ ratio }) => {
-                    if (ratio > 0 && ratio <= 1) {
-                        const p = 45 + Math.round(ratio * 50);
-                        bar.style.width = p + '%';
-                        pct.textContent = p + '%';
-                    }
-                });
-
-                await ffmpeg.run(...args);
+                await ffmpeg.exec(args);
                 log('Encode complete');
 
                 bar.style.width = '97%'; pct.textContent = '97%';
                 status.textContent = 'Packaging download...';
 
-                const data = ffmpeg.FS('readFile', outName);
-                const blob = new Blob([data.buffer], { type: 'video/mp4' });
+                const data = await ffmpeg.readFile(outName);
+                const buf = data instanceof Uint8Array ? data : new Uint8Array(data);
+                const blob = new Blob([buf], { type: 'video/mp4' });
                 const dlUrl = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = dlUrl;
@@ -798,10 +802,10 @@
 
                 // Cleanup virtual FS
                 try {
-                    clips.forEach((_, i) => { try { ffmpeg.FS('unlink', `clip${i}.mp4`); } catch(e){} });
-                    try { ffmpeg.FS('unlink', 'concat.txt'); } catch(e){}
-                    try { ffmpeg.FS('unlink', 'music.mp3'); } catch(e){}
-                    try { ffmpeg.FS('unlink', outName); } catch(e){}
+                    for (let i = 0; i < clips.length; i++) { try { await ffmpeg.deleteFile(`clip${i}.mp4`); } catch(e){} }
+                    try { await ffmpeg.deleteFile('concat.txt'); } catch(e){}
+                    try { await ffmpeg.deleteFile('music.mp3'); } catch(e){}
+                    try { await ffmpeg.deleteFile(outName); } catch(e){}
                 } catch (_) {}
 
                 bar.style.width = '100%'; pct.textContent = '100%';
