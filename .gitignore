@@ -4,3 +4,5 @@ node_modules/
 *.log
 .env
 .env.local
+# Self-hosted ffmpeg core (downloaded at deploy time, not tracked)
+ffmpeg/ffmpeg-core.wasm
