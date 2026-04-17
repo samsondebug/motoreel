@@ -724,11 +724,6 @@
                     bar.style.width = p + '%'; pct.textContent = p + '%';
                 }
 
-                // Concat demux list
-                let concat = '';
-                clips.forEach((_, i) => { concat += `file 'clip${i}.mp4'\n`; });
-                await ffmpeg.writeFile('concat.txt', new TextEncoder().encode(concat));
-
                 // Optional music track
                 let hasMusic = false;
                 if (musicFile && (musicFile.url || musicFile instanceof Blob || musicFile instanceof File)) {
@@ -743,53 +738,84 @@
                     }
                 }
 
-                // Build video filter chain for 9:16
-                let vf = "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,eq=contrast=1.15:saturation=1.1";
-                if (currentPreset === 'raw')   vf += ',noise=alls=6:allf=t';
-                if (currentPreset === 'night') vf += ',curves=all=\'0/0 0.4/0.55 1/1\'';
-                if (currentPreset === 'burn')  vf += ',eq=contrast=1.25:saturation=1.15';
-
+                // Build concat-filter chain. Re-encodes each input so iPhone HEVC/MOV +
+                // mixed framerates / timebases / codecs all normalize cleanly. Slower than
+                // the concat demuxer but actually works on arbitrary phone footage.
+                const N = clips.length;
+                const normV = 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30,format=yuv420p';
+                let presetChain = 'eq=contrast=1.15:saturation=1.1';
+                if (currentPreset === 'raw')   presetChain += ',noise=alls=6:allf=t';
+                if (currentPreset === 'night') presetChain += ",curves=all='0/0 0.4/0.55 1/1'";
+                if (currentPreset === 'burn')  presetChain += ',eq=contrast=1.25:saturation=1.15';
                 textOverlays.forEach(ov => {
-                    const txt = (ov.text || '').replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\u2019");
+                    const txt = (ov.text || '').replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, '\u2019');
                     let draw = `,drawtext=text='${txt}':fontcolor=${ov.color || '#f3e8d8'}:fontsize=${ov.size || 36}:x=(w-text_w)/2:y=${ov.y || 50}*h/100:enable='between(t\\,${ov.start || 0}\\,${ov.end || 9})'`;
                     if (ov.stroke) draw += ':bordercolor=#111111:borderw=2';
-                    vf += draw;
+                    presetChain += draw;
                 });
 
                 const outName = `motoreel-${currentPreset}-${Date.now()}.mp4`;
-                const baseArgs = ['-f', 'concat', '-safe', '0', '-i', 'concat.txt'];
-                const tailArgs = ['-vf', vf,
-                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '24',
-                    '-pix_fmt', 'yuv420p',
-                    '-movflags', '+faststart',
-                    '-r', '30',
-                    '-shortest', outName];
+                let fc = '';
+                for (let i = 0; i < N; i++) {
+                    fc += `[${i}:v]${normV},${presetChain}[v${i}];`;
+                    fc += `[${i}:a]aresample=async=1,aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a${i}];`;
+                }
+                let lbls = '';
+                for (let i = 0; i < N; i++) lbls += `[v${i}][a${i}]`;
+                fc += `${lbls}concat=n=${N}:v=1:a=1[vout][aout]`;
 
+                const inputs = [];
+                for (let i = 0; i < N; i++) inputs.push('-i', `clip${i}.mp4`);
                 let args;
                 if (hasMusic) {
-                    args = [...baseArgs, '-i', 'music.mp3',
-                            '-filter_complex', `[0:a?]anull[a0];[1:a]anull[a1];[a0][a1]amix=inputs=2:duration=shortest[aout]`,
-                            '-map', '0:v:0', '-map', '[aout]',
+                    const fcMix = fc.replace('[vout][aout]', '[vout][a_concat]') +
+                        `;[${N}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a_music];` +
+                        `[a_concat][a_music]amix=inputs=2:duration=shortest:dropout_transition=0[aout]`;
+                    args = [...inputs, '-i', 'music.mp3',
+                            '-filter_complex', fcMix,
+                            '-map', '[vout]', '-map', '[aout]',
+                            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26',
+                            '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-r', '30',
                             '-c:a', 'aac', '-b:a', '160k',
-                            ...tailArgs];
+                            '-shortest', outName];
                 } else {
-                    args = [...baseArgs, '-map', '0:v:0', '-map', '0:a?',
+                    args = [...inputs,
+                            '-filter_complex', fc,
+                            '-map', '[vout]', '-map', '[aout]',
+                            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26',
+                            '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-r', '30',
                             '-c:a', 'aac', '-b:a', '128k',
-                            ...tailArgs];
+                            outName];
                 }
 
                 status.textContent = 'Encoding clean 9:16 reel...';
                 bar.style.width = '45%'; pct.textContent = '45%';
                 log('Running ffmpeg...');
 
-                await ffmpeg.exec(args);
+                // Capture ffmpeg logs so we can surface meaningful errors
+                const ffLogs = [];
+                const logCapture = ({ message }) => { ffLogs.push(message); if (ffLogs.length > 160) ffLogs.shift(); };
+                ffmpeg.on('log', logCapture);
+                let exitCode;
+                try { exitCode = await ffmpeg.exec(args); } finally { ffmpeg.off('log', logCapture); }
+                if (typeof exitCode === 'number' && exitCode !== 0) {
+                    const errLines = ffLogs.filter(l => /error|invalid|failed|could not|not supported|unsupported|unrecognized|no such/i.test(l));
+                    const detail = (errLines.slice(-3).join(' | ') || ffLogs.slice(-3).join(' | ')) || ('exit ' + exitCode);
+                    throw new Error('ffmpeg: ' + detail.slice(0, 280));
+                }
                 log('Encode complete');
 
                 bar.style.width = '97%'; pct.textContent = '97%';
                 status.textContent = 'Packaging download...';
 
-                const data = await ffmpeg.readFile(outName);
+                let data;
+                try { data = await ffmpeg.readFile(outName); }
+                catch (readErr) {
+                    const errLines = ffLogs.filter(l => /error|invalid|failed|could not|not supported|unsupported|unrecognized|no such/i.test(l));
+                    throw new Error('No output file. ' + (errLines.slice(-2).join(' | ') || 'ffmpeg produced nothing').slice(0, 240));
+                }
                 const buf = data instanceof Uint8Array ? data : new Uint8Array(data);
+                if (!buf.byteLength) throw new Error('Output file is 0 bytes');
                 const blob = new Blob([buf], { type: 'video/mp4' });
                 const dlUrl = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -803,7 +829,6 @@
                 // Cleanup virtual FS
                 try {
                     for (let i = 0; i < clips.length; i++) { try { await ffmpeg.deleteFile(`clip${i}.mp4`); } catch(e){} }
-                    try { await ffmpeg.deleteFile('concat.txt'); } catch(e){}
                     try { await ffmpeg.deleteFile('music.mp3'); } catch(e){}
                     try { await ffmpeg.deleteFile(outName); } catch(e){}
                 } catch (_) {}
